@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Índices · Variación entre fechas</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #1f5fbf;
+    --up: #b42318;
+    --down: #067647;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .bulk {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: end;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .bulk label { display: flex; flex-direction: column; font-size: .8rem; color: var(--muted); gap: 4px; }
+  input[type=date] {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 6px; background: #fff; color: var(--text);
+  }
+  button {
+    font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  .table-wrap {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; background: #fafbfc; }
+  tr:last-child td { border-bottom: none; }
+  td.nombre { font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th.num { text-align: right; }
+  .small { display: block; font-size: .75rem; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .pct { font-weight: 700; font-size: 1.05rem; }
+  .pct.up { color: var(--up); }
+  .pct.down { color: var(--down); }
+  .na { color: var(--muted); }
+  .estado { margin-top: 14px; font-size: .8rem; color: var(--muted); }
+  .error { background: #fef3f2; border: 1px solid #fecdca; color: var(--up); padding: 12px 14px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Índices y cotizaciones</h1>
+  <p class="sub">Elegí una fecha desde y una fecha hasta para cada índice y vas a ver el valor en cada fecha y la variación acumulada entre ambas.</p>
+
+  <div class="bulk">
+    <label>Fecha desde (todas)<input type="date" id="bulk-desde"></label>
+    <label>Fecha hasta (todas)<input type="date" id="bulk-hasta"></label>
+    <button id="bulk-aplicar" type="button">Aplicar a todos los índices</button>
+  </div>
+
+  <div id="contenido"><p class="estado">Cargando datos…</p></div>
+  <p class="estado" id="estado"></p>
+</main>
+
+<script>
+(function () {
+  const $ = (s) => document.querySelector(s);
+  let indices = [];
+
+  // ---------- utilidades ----------
+  const hoyISO = () => {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  };
+  const restarAnio = (iso) => {
+    const [y, m, d] = iso.split("-");
+    return `${+y - 1}-${m}-${d}`;
+  };
+  const fmtFecha = (iso) => {
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  };
+  const fmtNum = (n, dec) =>
+    n.toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const fmtValor = (n, unidad) => (unidad === "$" ? "$ " + fmtNum(n, 2) : fmtNum(n, 2));
+
+  // Valor de un registro: "Acumulado / Valor hora"; para cotizaciones ($) el precio está en "Valor mensual".
+  const valorDe = (fila, unidad) => {
+    if (fila[1] != null) return fila[1];
+    if (unidad === "$" && fila[2] != null) return fila[2];
+    return null;
+  };
+
+  // Último dato con valor en o antes de la fecha.
+  function datoAl(idx, fecha) {
+    let res = null;
+    for (const f of idx.datos) {
+      if (f[0] > fecha) break;
+      const v = valorDe(f, idx.unidad);
+      if (v != null) res = { fecha: f[0], valor: v };
+    }
+    return res;
+  }
+
+  // Último registro (con o sin valor) en o antes de la fecha.
+  function filaAl(idx, fecha) {
+    let res = null;
+    for (const f of idx.datos) {
+      if (f[0] > fecha) break;
+      res = f;
+    }
+    return res;
+  }
+
+  function calcular(idx, desde, hasta) {
+    if (!desde || !hasta) return { msg: "Completá las dos fechas" };
+    if (desde > hasta) return { msg: "La fecha desde es posterior a la fecha hasta" };
+
+    const d = datoAl(idx, desde);
+    const h = datoAl(idx, hasta);
+    const out = { d, h };
+
+    if (d && h) {
+      out.pct = (h.valor / d.valor - 1) * 100;
+      out.metodo = "valores";
+      return out;
+    }
+
+    // Sin valor acumulado: se componen las variaciones mensuales (%) entre ambas fechas.
+    if (idx.unidad === "%") {
+      const base = filaAl(idx, desde);
+      const inicio = base ? base[0] : desde;
+      const finFila = filaAl(idx, hasta);
+      let factor = 1, n = 0;
+      for (const f of idx.datos) {
+        if (f[0] <= inicio || f[0] > hasta) continue;
+        if (f[2] == null) continue;
+        factor *= 1 + f[2];
+        n++;
+      }
+      if (base || n) {
+        out.pct = (factor - 1) * 100;
+        out.metodo = "variaciones";
+        out.base = inicio;
+        out.fin = finFila ? finFila[0] : null;
+        out.n = n;
+        return out;
+      }
+    }
+    out.msg = "Sin datos para esas fechas";
+    return out;
+  }
+
+  // ---------- render ----------
+  function celdaValor(dato, unidad) {
+    if (!dato) return '<span class="na">—</span>';
+    return `${fmtValor(dato.valor, unidad)}<span class="small">dato al ${fmtFecha(dato.fecha)}</span>`;
+  }
+
+  function actualizarFila(i) {
+    const idx = indices[i];
+    const tr = document.querySelector(`tr[data-i="${i}"]`);
+    const desde = tr.querySelector(".desde").value;
+    const hasta = tr.querySelector(".hasta").value;
+    const r = calcular(idx, desde, hasta);
+
+    tr.querySelector(".v-desde").innerHTML = celdaValor(r.d, idx.unidad);
+    tr.querySelector(".v-hasta").innerHTML = celdaValor(r.h, idx.unidad);
+
+    const celdaPct = tr.querySelector(".v-pct");
+    if (r.pct == null) {
+      celdaPct.innerHTML = `<span class="na">${r.msg || "—"}</span>`;
+      return;
+    }
+    const clase = r.pct > 0 ? "up" : r.pct < 0 ? "down" : "";
+    const signo = r.pct > 0 ? "+" : "";
+    let nota = "";
+    if (r.metodo === "variaciones") {
+      nota = `<span class="small">compuesto de ${r.n} variación${r.n === 1 ? "" : "es"} mensual${r.n === 1 ? "" : "es"}</span>`;
+    }
+    celdaPct.innerHTML = `<span class="pct ${clase}">${signo}${fmtNum(r.pct, 2)}%</span>${nota}`;
+  }
+
+  function render() {
+    const hasta = hoyISO();
+    const desde = restarAnio(hasta);
+    $("#bulk-desde").value = desde;
+    $("#bulk-hasta").value = hasta;
+
+    const filas = indices.map((idx, i) => {
+      const primero = idx.datos[0] ? idx.datos[0][0] : "";
+      const ultimo = idx.datos.length ? idx.datos[idx.datos.length - 1][0] : "";
+      return `<tr data-i="${i}">
+        <td class="nombre">${idx.nombre.replace(/</g, "&lt;")}
+          <span class="small">datos del ${fmtFecha(primero)} al ${fmtFecha(ultimo)}</span></td>
+        <td><input type="date" class="desde" value="${desde}" aria-label="Fecha desde"></td>
+        <td><input type="date" class="hasta" value="${hasta}" aria-label="Fecha hasta"></td>
+        <td class="num v-desde"></td>
+        <td class="num v-hasta"></td>
+        <td class="num v-pct"></td>
+      </tr>`;
+    }).join("");
+
+    $("#contenido").innerHTML = `<div class="table-wrap"><table>
+      <thead><tr>
+        <th>Índice</th><th>Fecha desde</th><th>Fecha hasta</th>
+        <th class="num">Valor desde</th><th class="num">Valor hasta</th><th class="num">% acumulado</th>
+      </tr></thead>
+      <tbody>${filas}</tbody></table></div>`;
+
+    indices.forEach((_, i) => actualizarFila(i));
+    document.querySelectorAll("tbody input[type=date]").forEach((inp) => {
+      inp.addEventListener("change", () => actualizarFila(+inp.closest("tr").dataset.i));
+    });
+  }
+
+  $("#bulk-aplicar").addEventListener("click", () => {
+    const d = $("#bulk-desde").value, h = $("#bulk-hasta").value;
+    document.querySelectorAll("tbody tr").forEach((tr) => {
+      if (d) tr.querySelector(".desde").value = d;
+      if (h) tr.querySelector(".hasta").value = h;
+      actualizarFila(+tr.dataset.i);
+    });
+  });
+
+  fetch("/api/datos")
+    .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+    .then(({ ok, j }) => {
+      if (!ok) throw new Error(j.error || "Error al leer la planilla");
+      indices = j.indices;
+      render();
+      $("#estado").textContent =
+        "Datos leídos de Google Sheets el " + new Date(j.actualizado).toLocaleString("es-AR") +
+        ". El valor de cada fecha es el último dato disponible en o antes de ese día.";
+    })
+    .catch((e) => {
+      $("#contenido").innerHTML = `<div class="error">No se pudieron cargar los datos: ${String(e.message).replace(/</g, "&lt;")}</div>`;
+    });
+})();
+</script>
+</body>
+</html>

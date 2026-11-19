@@ -1,0 +1,8 @@
+{
+  "name": "proyecto-indices",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/datos.test.js"
+  }
+}
