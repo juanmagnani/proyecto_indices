@@ -188,7 +188,7 @@
     const signo = r.pct > 0 ? "+" : "";
     let nota = "";
     if (r.metodo === "variaciones") {
-      nota = `<span class="small">compuesto de ${r.n} variación${r.n === 1 ? "" : "es"} mensual${r.n === 1 ? "" : "es"}</span>`;
+      nota = `<span class="small">compuesto de ${r.n} ${r.n === 1 ? "variación mensual" : "variaciones mensuales"}</span>`;
     }
     celdaPct.innerHTML = `<span class="pct ${clase}">${signo}${fmtNum(r.pct, 2)}%</span>${nota}`;
   }
@@ -242,7 +242,7 @@
       indices = j.indices;
       render();
       $("#estado").textContent =
-        "Datos leídos de Google Sheets el " + new Date(j.actualizado).toLocaleString("es-AR") +
+        "Datos leídos de Google Sheets el " + new Date(j.actualizado).toLocaleString("es-AR", { hour12: false }) +
         ". El valor de cada fecha es el último dato disponible en o antes de ese día.";
     })
     .catch((e) => {
